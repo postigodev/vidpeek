@@ -1,6 +1,6 @@
 {
   "name": "vidpeek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A modern typed FFmpeg preview generator for Node and CLI.",
   "type": "module",
   "main": "./dist/index.js",
