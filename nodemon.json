@@ -1,5 +1,0 @@
-{
-  "watch": ["src"],
-  "ext": "js,ts",
-  "exec": "pnpm run build && node --no-warnings ./dist/index.js"
-}

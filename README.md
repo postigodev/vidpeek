@@ -1,74 +1,123 @@
-# vidpeek
+# VidPeek
 
-Generate .webp video previews from .mp4 files using TypeScript and ffmpeg
+Generate previews. Not FFmpeg headaches.
 
-### Installation
+Modern typed video preview generation for Node and CLI. VidPeek turns videos into lightweight animated previews using FFmpeg, with clean presets, safe temp handling, typed options, and a CLI designed for media apps.
+
+## Installation
 
 ```bash
-$ npm install video-previewer
-$ pnpm add video-previewer
-$ yarn add video-previewer
+pnpm add vidpeek
 ```
 
-### Usage
-
-```javascript
-import VideoPreviewer from "./generator/VideoPreviewer";
-
-const preview = new VideoPreviewer(
-  "video.mp4",
-  "output/path.webp", //output path
-  [
-    { start: "00:00:01", end: "00:00:04" }, // clips to take from video, string with 'HH:MM:SS' format
-    { start: "00:04:01", end: "00:04:04" },
-    { start: "00:12:01", end: "00:12:04" },
-    { start: "00:13:01", end: "00:13:04" },
-  ],
-  {
-    clipCount: 5,
-    clipTime: 5,
-    clipSelectStrategy: "max-size", // options: 'max-size', 'min-size', 'random'
-    clipRange: [0.1, 0.9],
-    fpsRate: 10, // number, -1 (default)
-    output: {
-      type: "buffer", // options: 'buffer' (default), 'file', 'dir'
-      path: "", // Required if output type is not 'buffer' (specify file or directory path)
-    },
-    speedMulti: 2,
-    width: 320, // number, video normal dimensions (default)
-    height: -1, // number, video normal dimensions (default)
-    bitrate: 1000, // optional, video bitrate in kbps
-    videoCodec: "libx264", // optional, codec for video encoding
-    audioCodec: "aac", // optional, codec for audio encoding
-    audioBitrate: 128, // optional, audio bitrate in kbps
-    format: "webp", // optional, output format for the preview
-    useHardwareAcceleration: false, // optional, enable hardware acceleration for processing
-    additionalOptions: "", // optional, any additional command line options for ffmpeg
-  }
-);
-preview.exec();
-
+```bash
+npm install vidpeek
 ```
 
-**Available options:**
+## FFmpeg Requirement
 
-| **Option**                | **Type**        | **Default**                |
-| ------------------------- | --------------- | -------------------------- |
-| `clipCount`               | `number`        | -                          |
-| `clipTime`                | `number`        | -                          |
-| `clipSelectStrategy`      | `string`        | 'max-size'                 |
-| `clipRange`               | `number[]`      | -                          |
-| `fpsRate`                 | `number`        | -1 (default: original fps) |
-| `output`                  | `OutputOptions` | `{type: 'buffer'}`         |
-| `speedMulti`              | `number`        | -                          |
-| `width`                   | `number`        | (default: original width)  |
-| `height`                  | `number`        | (default: original heigth) |
-| `bitrate`                 | `number`        | -                          |
-| `videoCodec`              | `string`        | `'libx264'`                |
-| `audioCodec`              | `string`        | `'aac'`                    |
-| `audioBitrate`            | `number`        | `128`                      |
-| `format`                  | `string`        | `'webp'`                   |
-| `useHardwareAcceleration` | `boolean`       | `false`                    |
-| `additionalOptions`       | `string`        | -                          |
+VidPeek uses FFmpeg and FFprobe under the hood. Install both and make sure `ffmpeg` and `ffprobe` are available on your `PATH`, or pass custom binary paths with `--ffmpeg-path`, `--ffprobe-path`, `ffmpegPath`, and `ffprobePath`.
 
----
+## CLI Usage
+
+```bash
+vidpeek input.mp4 --out preview.webp
+```
+
+```bash
+vidpeek input.mp4 \
+  --out preview.webp \
+  --preset web \
+  --strategy evenly-spaced \
+  --clips 5 \
+  --clip-duration 2 \
+  --width 320 \
+  --fps 10
+```
+
+Print JSON for application workflows:
+
+```bash
+vidpeek input.mp4 --out preview.webp --json
+```
+
+## Node API
+
+```ts
+import { generatePreview } from "vidpeek";
+
+await generatePreview({
+  input: "video.mp4",
+  output: "preview.webp",
+  preset: "web",
+  strategy: "evenly-spaced",
+  clips: {
+    count: 5,
+    duration: 2,
+  },
+  width: 320,
+  fps: 10,
+});
+```
+
+## Presets
+
+| Preset | Format | Width | FPS | Clips | Clip duration |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `tiny` | `webp` | 240 | 8 | 4 | 1.5s |
+| `web` | `webp` | 320 | 10 | 5 | 2s |
+| `discord` | `webp` | 360 | 12 | 4 | 2s |
+| `high-quality` | `webp` | 480 | 15 | 6 | 2s |
+
+## Options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `input` | `string` | Input video path. |
+| `output` | `string` | Output preview path. |
+| `format` | `"webp" \| "gif" \| "mp4"` | Output format. Defaults from the selected preset. |
+| `preset` | `"tiny" \| "web" \| "discord" \| "high-quality"` | Preview preset. Defaults to `web`. |
+| `strategy` | `"evenly-spaced" \| "random" \| "manual"` | Segment selection strategy. Defaults to `evenly-spaced`. |
+| `clips.count` | `number` | Number of clips to sample. |
+| `clips.duration` | `number` | Duration of each sampled clip in seconds. |
+| `clips.range` | `[number, number]` | Normalized sampling range. Defaults to `[0.05, 0.95]`. |
+| `clips.segments` | `{ start: number; duration: number }[]` | Required for manual segment selection. |
+| `width` | `number` | Output width. |
+| `height` | `number` | Output height. |
+| `fps` | `number` | Output frames per second. |
+| `speed` | `number` | Preview speed multiplier. |
+| `overwrite` | `boolean` | Replace an existing output file. |
+| `keepTemp` | `boolean` | Keep the temporary work directory for debugging. |
+| `ffmpegPath` | `string` | Custom FFmpeg binary path. |
+| `ffprobePath` | `string` | Custom FFprobe binary path. |
+
+## Benchmark
+
+Place a sample video at `benchmarks/fixtures/sample.mp4`, then run:
+
+```bash
+pnpm bench
+```
+
+The benchmark generates `tiny`, `web`, and `high-quality` previews and prints elapsed time plus output file size.
+
+## Why VidPeek
+
+- Typed API for Node apps.
+- CLI and library from the same core pipeline.
+- Safe per-run temp directories.
+- No shell command strings.
+- Readable FFmpeg and FFprobe errors.
+- Useful presets for real media product workflows.
+
+## Roadmap
+
+- Scene-change strategy.
+- Contact sheets.
+- Sprites.
+- AVIF previews.
+- Worker and concurrency options.
+
+## License
+
+MIT
