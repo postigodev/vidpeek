@@ -1,4 +1,4 @@
-# video-previewer
+# vidpeek
 
 Generate .webp video previews from .mp4 files using TypeScript and ffmpeg
 
