@@ -1,5 +1,5 @@
 {
-  "name": "@postigodev/vidpeek",
+  "name": "vidpeek",
   "version": "0.1.0",
   "description": "A modern typed FFmpeg preview generator for Node and CLI.",
   "type": "module",
