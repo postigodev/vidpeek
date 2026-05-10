@@ -25,6 +25,18 @@ export function formatCommand(binary: string, args: string[]): string {
   return [binary, ...args].map(quoteArg).join(" ");
 }
 
+function buildFailureHint(stderr: string): string {
+  if (/Unknown encoder|Encoder not found/i.test(stderr)) {
+    return [
+      "",
+      "Hint: this FFmpeg build does not include the required encoder for this output format.",
+      "Install an FFmpeg build with the needed encoder support or choose another output format.",
+    ].join("\n");
+  }
+
+  return "";
+}
+
 export async function runProcess({
   binary,
   args,
@@ -63,8 +75,8 @@ export async function runProcess({
             args,
             stderr,
             cause: error,
-          },
-        ),
+          }
+        )
       );
     });
 
@@ -75,11 +87,13 @@ export async function runProcess({
       }
 
       const stderrText = stderr.trim();
+      const hint = buildFailureHint(stderrText);
+
       reject(
         new VidPeekError(
           `${label} failed${stage ? ` during ${stage}` : ""} with exit code ${exitCode}.\nCommand: ${command}${
             stderrText ? `\n\n${stderrText}` : ""
-          }`,
+          }${hint}`,
           {
             code: "PROCESS_FAILED",
             stage,
@@ -88,8 +102,8 @@ export async function runProcess({
             args,
             exitCode,
             stderr,
-          },
-        ),
+          }
+        )
       );
     });
   });
@@ -98,7 +112,7 @@ export async function runProcess({
 export function runFfmpeg(
   args: string[],
   ffmpegPath = "ffmpeg",
-  stage?: string,
+  stage?: string
 ): Promise<ProcessResult> {
   return runProcess({ binary: ffmpegPath, args, label: "FFmpeg", stage });
 }
