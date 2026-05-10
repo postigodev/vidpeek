@@ -59,7 +59,7 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^12.1.0",
-    "zod": "^3.25.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.18",
