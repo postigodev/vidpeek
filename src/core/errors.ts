@@ -1,14 +1,15 @@
-export interface VidPeekErrorOptions {
-  code?: string;
-  command?: string;
-  exitCode?: number | null;
-  stderr?: string;
+import type { VidPeekErrorMetadata } from "../types/public";
+
+export interface VidPeekErrorOptions extends VidPeekErrorMetadata {
   cause?: unknown;
 }
 
 export class VidPeekError extends Error {
   readonly code?: string;
+  readonly stage?: string;
   readonly command?: string;
+  readonly binary?: string;
+  readonly args?: string[];
   readonly exitCode?: number | null;
   readonly stderr?: string;
 
@@ -16,7 +17,10 @@ export class VidPeekError extends Error {
     super(message);
     this.name = "VidPeekError";
     this.code = options.code;
+    this.stage = options.stage;
     this.command = options.command;
+    this.binary = options.binary;
+    this.args = options.args;
     this.exitCode = options.exitCode;
     this.stderr = options.stderr;
 

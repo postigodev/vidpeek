@@ -10,6 +10,7 @@ export interface RunProcessOptions {
   binary: string;
   args: string[];
   label?: string;
+  stage?: string;
 }
 
 function quoteArg(arg: string): string {
@@ -28,6 +29,7 @@ export async function runProcess({
   binary,
   args,
   label = binary,
+  stage,
 }: RunProcessOptions): Promise<ProcessResult> {
   const command = formatCommand(binary, args);
 
@@ -52,10 +54,13 @@ export async function runProcess({
     child.on("error", (error: NodeJS.ErrnoException) => {
       reject(
         new VidPeekError(
-          `${label} could not be started. Is it installed and available on PATH?`,
+          `${label} could not be started${stage ? ` during ${stage}` : ""}. Is it installed and available on PATH?`,
           {
             code: error.code ?? "PROCESS_START_FAILED",
+            stage,
             command,
+            binary,
+            args,
             stderr,
             cause: error,
           },
@@ -72,12 +77,15 @@ export async function runProcess({
       const stderrText = stderr.trim();
       reject(
         new VidPeekError(
-          `${label} failed with exit code ${exitCode}.\nCommand: ${command}${
+          `${label} failed${stage ? ` during ${stage}` : ""} with exit code ${exitCode}.\nCommand: ${command}${
             stderrText ? `\n\n${stderrText}` : ""
           }`,
           {
             code: "PROCESS_FAILED",
+            stage,
             command,
+            binary,
+            args,
             exitCode,
             stderr,
           },
@@ -87,6 +95,10 @@ export async function runProcess({
   });
 }
 
-export function runFfmpeg(args: string[], ffmpegPath = "ffmpeg"): Promise<ProcessResult> {
-  return runProcess({ binary: ffmpegPath, args, label: "FFmpeg" });
+export function runFfmpeg(
+  args: string[],
+  ffmpegPath = "ffmpeg",
+  stage?: string,
+): Promise<ProcessResult> {
+  return runProcess({ binary: ffmpegPath, args, label: "FFmpeg", stage });
 }

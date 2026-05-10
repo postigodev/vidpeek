@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-import { Command } from "commander";
-import { generatePreview } from "./index";
+import { Command, CommanderError } from "commander";
+import { pathToFileURL } from "node:url";
+import { dryRunPreview, generatePreview, generateThumbnail, probeVideo } from "./index";
 import { toVidPeekError } from "./core/errors";
 import type {
   GeneratePreviewOptions,
+  GenerateThumbnailOptions,
   PreviewFormat,
   SegmentStrategy,
   VidPeekPreset,
 } from "./types/public";
 
-interface CliOptions {
+interface PreviewCliOptions {
   out?: string;
   preset?: VidPeekPreset;
   strategy?: SegmentStrategy;
@@ -26,12 +28,42 @@ interface CliOptions {
   ffmpegPath?: string;
   ffprobePath?: string;
   json?: boolean;
+  dryRun?: boolean;
 }
+
+interface ThumbnailCliOptions {
+  out?: string;
+  at?: string;
+  width?: string;
+  height?: string;
+  overwrite?: boolean;
+  ffmpegPath?: string;
+  ffprobePath?: string;
+  json?: boolean;
+}
+
+interface ProbeCliOptions {
+  ffprobePath?: string;
+  json?: boolean;
+}
+
+const presetChoices = ["tiny", "web", "discord", "high-quality"] as const;
+const strategyChoices = ["evenly-spaced", "random", "manual"] as const;
+const formatChoices = ["webp", "gif", "mp4"] as const;
 
 function parsePositiveNumber(value: string, name: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive number.`);
+  }
+
+  return parsed;
+}
+
+function parseNonNegativeNumber(value: string, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be zero or greater.`);
   }
 
   return parsed;
@@ -61,7 +93,19 @@ function parseRange(value: string): [number, number] {
   return [parts[0], parts[1]];
 }
 
-function toGenerateOptions(input: string, cli: CliOptions): GeneratePreviewOptions {
+function parseThumbnailAt(value: string | undefined): GenerateThumbnailOptions["at"] {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value.endsWith("%")) {
+    return value as `${number}%`;
+  }
+
+  return parseNonNegativeNumber(value, "--at");
+}
+
+export function toGenerateOptions(input: string, cli: PreviewCliOptions): GeneratePreviewOptions {
   if (!cli.out) {
     throw new Error("--out is required.");
   }
@@ -90,63 +134,219 @@ function toGenerateOptions(input: string, cli: CliOptions): GeneratePreviewOptio
   };
 }
 
-const program = new Command();
+function toThumbnailOptions(input: string, cli: ThumbnailCliOptions): GenerateThumbnailOptions {
+  if (!cli.out) {
+    throw new Error("--out is required.");
+  }
 
-program
-  .name("vidpeek")
-  .description("A modern typed FFmpeg preview generator for Node and CLI.")
-  .argument("<input>", "input video path")
-  .requiredOption("--out <path>", "output preview path")
-  .option("--preset <preset>", "tiny, web, discord, or high-quality")
-  .option("--strategy <strategy>", "evenly-spaced, random, or manual")
-  .option("--clips <number>", "number of clips to sample")
-  .option("--clip-duration <seconds>", "duration of each sampled clip")
-  .option("--range <start,end>", "normalized sampling range, for example 0.05,0.95")
-  .option("--width <number>", "output width")
-  .option("--height <number>", "output height")
-  .option("--fps <number>", "output frames per second")
-  .option("--speed <number>", "preview speed multiplier")
-  .option("--format <format>", "webp, gif, or mp4")
-  .option("--overwrite", "replace output if it already exists")
-  .option("--keep-temp", "keep temporary working directory")
-  .option("--ffmpeg-path <path>", "custom ffmpeg binary path")
-  .option("--ffprobe-path <path>", "custom ffprobe binary path")
-  .option("--json", "print machine-readable result JSON")
-  .action(async (input: string, cli: CliOptions) => {
-    try {
-      const result = await generatePreview(toGenerateOptions(input, cli));
+  return {
+    input,
+    output: cli.out,
+    at: parseThumbnailAt(cli.at),
+    width: cli.width ? parsePositiveInteger(cli.width, "--width") : undefined,
+    height: cli.height ? parsePositiveInteger(cli.height, "--height") : undefined,
+    overwrite: cli.overwrite,
+    ffmpegPath: cli.ffmpegPath,
+    ffprobePath: cli.ffprobePath,
+  };
+}
 
-      if (cli.json) {
-        console.log(JSON.stringify(result, null, 2));
-        return;
+function printError(error: unknown, json?: boolean): void {
+  const vidPeekError = toVidPeekError(error);
+
+  if (json) {
+    console.error(
+      JSON.stringify(
+        {
+          error: vidPeekError.message,
+          code: vidPeekError.code,
+          stage: vidPeekError.stage,
+          command: vidPeekError.command,
+          exitCode: vidPeekError.exitCode,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  console.error(`VidPeek error: ${vidPeekError.message}`);
+}
+
+function addPreviewOptions(command: Command): Command {
+  return command
+    .option("--out <path>", "output preview path")
+    .option("--preset <preset>", "tiny, web, discord, or high-quality")
+    .option("--strategy <strategy>", "evenly-spaced, random, or manual")
+    .option("--clips <number>", "number of clips to sample")
+    .option("--clip-duration <seconds>", "duration of each sampled clip")
+    .option("--range <start,end>", "normalized sampling range, for example 0.05,0.95")
+    .option("--width <number>", "output width")
+    .option("--height <number>", "output height")
+    .option("--fps <number>", "output frames per second")
+    .option("--speed <number>", "preview speed multiplier")
+    .option("--format <format>", "webp, gif, or mp4")
+    .option("--overwrite", "replace output if it already exists")
+    .option("--keep-temp", "keep temporary working directory")
+    .option("--ffmpeg-path <path>", "custom ffmpeg binary path")
+    .option("--ffprobe-path <path>", "custom ffprobe binary path")
+    .option("--json", "print machine-readable result JSON")
+    .option("--dry-run", "probe and print planned preview segments without generating files");
+}
+
+function validatePreviewChoices(options: PreviewCliOptions): void {
+  if (options.preset && !presetChoices.includes(options.preset)) {
+    throw new Error(`Invalid preset: ${options.preset}. Expected one of: ${presetChoices.join(", ")}.`);
+  }
+
+  if (options.strategy && !strategyChoices.includes(options.strategy)) {
+    throw new Error(
+      `Invalid strategy: ${options.strategy}. Expected one of: ${strategyChoices.join(", ")}.`,
+    );
+  }
+
+  if (options.format && !formatChoices.includes(options.format)) {
+    throw new Error(`Invalid format: ${options.format}. Expected one of: ${formatChoices.join(", ")}.`);
+  }
+}
+
+async function runPreview(input: string, cli: PreviewCliOptions): Promise<void> {
+  validatePreviewChoices(cli);
+  const options = toGenerateOptions(input, cli);
+
+  if (cli.dryRun) {
+    const result = await dryRunPreview(options);
+    if (cli.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log(`VidPeek dry run for ${result.input}`);
+    console.log(`Output: ${result.output}`);
+    console.log(`Preset: ${result.preset}`);
+    console.log(`Format: ${result.format}`);
+    console.log(`Duration: ${result.duration.toFixed(2)}s`);
+    console.log(`Segments: ${result.segments.length}`);
+    return;
+  }
+
+  const result = await generatePreview(options);
+
+  if (cli.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`VidPeek generated ${result.format} preview: ${result.output}`);
+  console.log(`Duration: ${result.duration.toFixed(2)}s`);
+  console.log(`Segments: ${result.segments.length}`);
+  if (result.sizeBytes !== undefined) {
+    console.log(`Size: ${result.sizeBytes} bytes`);
+  }
+  console.log(`Elapsed: ${result.elapsedMs}ms`);
+}
+
+async function runThumbnail(input: string, cli: ThumbnailCliOptions): Promise<void> {
+  const result = await generateThumbnail(toThumbnailOptions(input, cli));
+
+  if (cli.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`VidPeek generated thumbnail: ${result.output}`);
+  console.log(`Timestamp: ${result.at.toFixed(3)}s`);
+  if (result.sizeBytes !== undefined) {
+    console.log(`Size: ${result.sizeBytes} bytes`);
+  }
+  console.log(`Elapsed: ${result.elapsedMs}ms`);
+}
+
+async function runProbe(input: string, cli: ProbeCliOptions): Promise<void> {
+  const metadata = await probeVideo(input, cli.ffprobePath);
+
+  if (cli.json) {
+    console.log(JSON.stringify(metadata, null, 2));
+    return;
+  }
+
+  console.log(`Duration: ${metadata.duration.toFixed(2)}s`);
+  if (metadata.width && metadata.height) {
+    console.log(`Dimensions: ${metadata.width}x${metadata.height}`);
+  }
+  if (metadata.fps) {
+    console.log(`FPS: ${metadata.fps}`);
+  }
+  if (metadata.videoCodec) {
+    console.log(`Video codec: ${metadata.videoCodec}`);
+  }
+  if (metadata.audioCodec) {
+    console.log(`Audio codec: ${metadata.audioCodec}`);
+  }
+  if (metadata.format) {
+    console.log(`Format: ${metadata.format}`);
+  }
+}
+
+export function createProgram(): Command {
+  const program = new Command();
+
+  program
+    .name("vidpeek")
+    .description("A modern typed FFmpeg preview generator for Node and CLI.")
+    .enablePositionalOptions()
+    .showHelpAfterError()
+    .exitOverride();
+
+  addPreviewOptions(program.argument("[input]", "input video path")).action(
+    async (input: string | undefined, cli: PreviewCliOptions) => {
+      if (!input) {
+        throw new Error("input is required.");
       }
 
-      console.log(`VidPeek generated ${result.format} preview: ${result.output}`);
-      console.log(`Duration: ${result.duration.toFixed(2)}s`);
-      console.log(`Segments: ${result.segments.length}`);
-      console.log(`Elapsed: ${result.elapsedMs}ms`);
-    } catch (error) {
-      const vidPeekError = toVidPeekError(error);
+      await runPreview(input, cli);
+    },
+  );
 
-      if (cli.json) {
-        console.error(
-          JSON.stringify(
-            {
-              error: vidPeekError.message,
-              code: vidPeekError.code,
-              command: vidPeekError.command,
-              exitCode: vidPeekError.exitCode,
-            },
-            null,
-            2,
-          ),
-        );
-      } else {
-        console.error(`VidPeek error: ${vidPeekError.message}`);
-      }
+  program
+    .command("thumbnail")
+    .description("generate a still thumbnail")
+    .argument("<input>", "input video path")
+    .requiredOption("--out <path>", "output thumbnail path")
+    .option("--at <time>", "timestamp in seconds or percentage, for example 12.5 or 25%")
+    .option("--width <number>", "output width")
+    .option("--height <number>", "output height")
+    .option("--overwrite", "replace output if it already exists")
+    .option("--ffmpeg-path <path>", "custom ffmpeg binary path")
+    .option("--ffprobe-path <path>", "custom ffprobe binary path")
+    .option("--json", "print machine-readable result JSON")
+    .action(runThumbnail);
 
+  program
+    .command("probe")
+    .description("print video metadata from ffprobe")
+    .argument("<input>", "input video path")
+    .option("--ffprobe-path <path>", "custom ffprobe binary path")
+    .option("--json", "print machine-readable result JSON")
+    .action(runProbe);
+
+  return program;
+}
+
+async function main(): Promise<void> {
+  try {
+    await createProgram().parseAsync();
+  } catch (error) {
+    if (error instanceof CommanderError) {
+      process.exitCode = error.exitCode;
+    } else {
+      printError(error, process.argv.includes("--json"));
       process.exitCode = 1;
     }
-  });
+  }
+}
 
-await program.parseAsync();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

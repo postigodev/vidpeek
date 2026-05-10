@@ -1,8 +1,14 @@
-import { access, mkdir, stat, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { VidPeekError, toVidPeekError } from "./errors";
+import { toVidPeekError } from "./errors";
 import { runFfmpeg } from "./ffmpeg";
 import { probeVideo } from "./ffprobe";
+import {
+  assertCanWriteOutput,
+  assertInputFileExists,
+  ensureOutputDirectory,
+  getFileSize,
+} from "./output";
 import { resolveOptions } from "./presets";
 import { selectSegments } from "./segments";
 import { cleanupTempDir, createTempDir } from "./temp";
@@ -39,33 +45,13 @@ function buildVideoFilters(options: {
   return filters;
 }
 
-function overwriteArgs(overwrite: boolean): string[] {
-  return [overwrite ? "-y" : "-n"];
-}
-
 function concatFilePath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
   return `file '${normalized.replace(/'/g, "'\\''")}'`;
 }
 
-async function assertCanWriteOutput(output: string, overwrite: boolean): Promise<void> {
-  if (overwrite) {
-    return;
-  }
-
-  try {
-    await access(output);
-  } catch {
-    return;
-  }
-
-  throw new VidPeekError(`Output already exists: ${output}. Pass overwrite: true to replace it.`, {
-    code: "OUTPUT_EXISTS",
-  });
-}
-
-async function fileSize(filePath: string): Promise<number> {
-  return (await stat(filePath)).size;
+function overwriteArg(overwrite: boolean): string {
+  return overwrite ? "-y" : "-n";
 }
 
 async function transcodeFinal(options: {
@@ -76,7 +62,7 @@ async function transcodeFinal(options: {
   overwrite: boolean;
   ffmpegPath: string;
 }): Promise<void> {
-  const args = [...overwriteArgs(options.overwrite), "-i", options.input, "-an"];
+  const args = [overwriteArg(options.overwrite), "-i", options.input, "-an"];
 
   if (options.filters.length > 0) {
     args.push("-vf", options.filters.join(","));
@@ -98,7 +84,7 @@ async function transcodeFinal(options: {
     );
   }
 
-  await runFfmpeg(args, options.ffmpegPath);
+  await runFfmpeg(args, options.ffmpegPath, "final encoding");
 }
 
 export async function generatePreview(
@@ -109,8 +95,9 @@ export async function generatePreview(
   const tempDir = await createTempDir();
 
   try {
+    await assertInputFileExists(resolved.input);
     await assertCanWriteOutput(resolved.output, resolved.overwrite);
-    await mkdir(path.dirname(resolved.output), { recursive: true });
+    await ensureOutputDirectory(resolved.output);
 
     const metadata = await probeVideo(resolved.input, resolved.ffprobePath);
     const segments = selectSegments(metadata.duration, resolved);
@@ -137,6 +124,7 @@ export async function generatePreview(
           clipPath,
         ],
         resolved.ffmpegPath,
+        "segment extraction",
       );
       clipPaths.push(clipPath);
     }
@@ -148,6 +136,7 @@ export async function generatePreview(
     await runFfmpeg(
       ["-y", "-f", "concat", "-safe", "0", "-i", fileListPath, "-c", "copy", mergedPath],
       resolved.ffmpegPath,
+      "clip concatenation",
     );
 
     await transcodeFinal({
@@ -159,14 +148,13 @@ export async function generatePreview(
       ffmpegPath: resolved.ffmpegPath,
     });
 
-    await fileSize(resolved.output);
-
     return {
       output: resolved.output,
       format: resolved.format,
       duration: metadata.duration,
       segments,
       elapsedMs: Math.round(performance.now() - startedAt),
+      sizeBytes: await getFileSize(resolved.output),
     };
   } catch (error) {
     throw toVidPeekError(error);

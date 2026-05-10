@@ -1,7 +1,7 @@
 {
   "name": "vidpeek",
-  "version": "0.1.1",
-  "description": "A modern typed FFmpeg preview generator for Node and CLI.",
+  "version": "1.0.0",
+  "description": "Typed video preview generation for Node.js and CLI.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,26 +17,39 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/postigodev/vidpeek.git"
   },
+  "bugs": {
+    "url": "https://github.com/postigodev/vidpeek/issues"
+  },
+  "homepage": "https://github.com/postigodev/vidpeek#readme",
   "scripts": {
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
+    "test:integration": "vitest run test/integration",
     "bench": "tsx benchmarks/run.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:dry": "npm pack --dry-run",
+    "release:check": "pnpm typecheck && pnpm test && pnpm build && npm pack --dry-run",
+    "smoke:consumer": "tsx scripts/smoke-consumer.ts"
   },
   "keywords": [
     "ffmpeg",
+    "ffprobe",
     "video",
     "preview",
+    "thumbnail",
     "webp",
-    "gif",
-    "cli"
+    "cli",
+    "typescript",
+    "media",
+    "node"
   ],
   "engines": {
     "node": ">=18"
