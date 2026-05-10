@@ -3,3 +3,5 @@
 /benchmarks/out
 *.tsbuildinfo
 /.pnpm-store
+/benchmarks/fixtures/sample.mp4
+/assets
