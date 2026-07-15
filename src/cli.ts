@@ -7,6 +7,7 @@ import type {
   GeneratePreviewOptions,
   GenerateThumbnailOptions,
   PreviewFormat,
+  SceneFallback,
   SegmentStrategy,
   VidPeekPreset,
 } from "./types/public";
@@ -18,6 +19,11 @@ interface PreviewCliOptions {
   clips?: string;
   clipDuration?: string;
   range?: string;
+  sceneThreshold?: string;
+  sceneMinGap?: string;
+  sceneFallback?: string;
+  sceneMaxCandidates?: string;
+  sceneAnalysisFps?: string;
   width?: string;
   height?: string;
   fps?: string;
@@ -48,7 +54,8 @@ interface ProbeCliOptions {
 }
 
 const presetChoices = ["tiny", "web", "discord", "high-quality"] as const;
-const strategyChoices = ["evenly-spaced", "random", "manual"] as const;
+const strategyChoices = ["evenly-spaced", "random", "manual", "scene-change"] as const;
+const sceneFallbackChoices = ["evenly-spaced", "none", "error"] as const;
 const formatChoices = ["webp", "gif", "mp4"] as const;
 
 function parsePositiveNumber(value: string, name: string): number {
@@ -93,6 +100,24 @@ function parseRange(value: string): [number, number] {
   return [parts[0], parts[1]];
 }
 
+function parseSceneThreshold(value: string): number {
+  const parsed = parseNonNegativeNumber(value, "--scene-threshold");
+  if (parsed > 100) {
+    throw new Error("--scene-threshold must be between 0 and 100.");
+  }
+  return parsed;
+}
+
+function hasSceneCliOptions(cli: PreviewCliOptions): boolean {
+  return [
+    cli.sceneThreshold,
+    cli.sceneMinGap,
+    cli.sceneFallback,
+    cli.sceneMaxCandidates,
+    cli.sceneAnalysisFps,
+  ].some((value) => value !== undefined);
+}
+
 function parseThumbnailAt(value: string | undefined): GenerateThumbnailOptions["at"] {
   if (!value) {
     return undefined;
@@ -110,6 +135,28 @@ export function toGenerateOptions(input: string, cli: PreviewCliOptions): Genera
     throw new Error("--out is required.");
   }
 
+  const scene = hasSceneCliOptions(cli)
+    ? {
+        threshold:
+          cli.sceneThreshold === undefined
+            ? undefined
+            : parseSceneThreshold(cli.sceneThreshold),
+        minGap:
+          cli.sceneMinGap === undefined
+            ? undefined
+            : parseNonNegativeNumber(cli.sceneMinGap, "--scene-min-gap"),
+        fallback: cli.sceneFallback as SceneFallback | undefined,
+        maxCandidates:
+          cli.sceneMaxCandidates === undefined
+            ? undefined
+            : parsePositiveInteger(cli.sceneMaxCandidates, "--scene-max-candidates"),
+        analysisFps:
+          cli.sceneAnalysisFps === undefined
+            ? undefined
+            : parsePositiveNumber(cli.sceneAnalysisFps, "--scene-analysis-fps"),
+      }
+    : undefined;
+
   return {
     input,
     output: cli.out,
@@ -122,6 +169,7 @@ export function toGenerateOptions(input: string, cli: PreviewCliOptions): Genera
         ? parsePositiveNumber(cli.clipDuration, "--clip-duration")
         : undefined,
       range: cli.range ? parseRange(cli.range) : undefined,
+      scene,
     },
     width: cli.width ? parsePositiveInteger(cli.width, "--width") : undefined,
     height: cli.height ? parsePositiveInteger(cli.height, "--height") : undefined,
@@ -178,10 +226,15 @@ function addPreviewOptions(command: Command): Command {
   return command
     .option("--out <path>", "output preview path")
     .option("--preset <preset>", "tiny, web, discord, or high-quality")
-    .option("--strategy <strategy>", "evenly-spaced, random, or manual")
+    .option("--strategy <strategy>", "evenly-spaced, random, manual, or scene-change")
     .option("--clips <number>", "number of clips to sample")
     .option("--clip-duration <seconds>", "duration of each sampled clip")
     .option("--range <start,end>", "normalized sampling range, for example 0.05,0.95")
+    .option("--scene-threshold <number>", "scene score threshold from 0 to 100")
+    .option("--scene-min-gap <seconds>", "minimum gap between detected scenes")
+    .option("--scene-fallback <mode>", "evenly-spaced, none, or error")
+    .option("--scene-max-candidates <number>", "maximum top scene candidates to consider")
+    .option("--scene-analysis-fps <number>", "sample FPS used during scene analysis")
     .option("--width <number>", "output width")
     .option("--height <number>", "output height")
     .option("--fps <number>", "output frames per second")
@@ -208,6 +261,19 @@ function validatePreviewChoices(options: PreviewCliOptions): void {
 
   if (options.format && !formatChoices.includes(options.format)) {
     throw new Error(`Invalid format: ${options.format}. Expected one of: ${formatChoices.join(", ")}.`);
+  }
+
+  if (
+    options.sceneFallback &&
+    !sceneFallbackChoices.includes(options.sceneFallback as (typeof sceneFallbackChoices)[number])
+  ) {
+    throw new Error(
+      `Invalid scene fallback: ${options.sceneFallback}. Expected one of: ${sceneFallbackChoices.join(", ")}.`,
+    );
+  }
+
+  if (hasSceneCliOptions(options) && options.strategy !== "scene-change") {
+    throw new Error("Scene options require --strategy scene-change.");
   }
 }
 

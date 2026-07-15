@@ -2,7 +2,7 @@
 
 VidPeek aims to be modern typed preview-generation infrastructure for media apps.
 
-## v0.1
+## v1.0 — Shipped
 
 Foundation release.
 
@@ -13,17 +13,17 @@ Foundation release.
 - Benchmark script
 - CI
 
-## v0.2
+## Next
 
 Preview quality and metadata.
 
-- Scene-change segment strategy
+- Scene-change segment strategy (implemented, unreleased)
 - Better JSON metadata output
 - GIF and MP4 polish
 - More examples
 - Integration tests with FFmpeg
 
-## v0.3
+## Future
 
 More media-app primitives.
 

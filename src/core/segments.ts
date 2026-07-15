@@ -92,6 +92,12 @@ export function selectSegments(
     );
   }
 
+  if (options.strategy === "scene-change") {
+    throw new VidPeekError("Scene-change strategy requires FFmpeg analysis.", {
+      code: "SCENE_ANALYSIS_REQUIRED",
+    });
+  }
+
   if (options.strategy === "random") {
     return selectRandom(
       duration,

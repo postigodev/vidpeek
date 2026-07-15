@@ -11,6 +11,7 @@ VidPeek is a typed video preview generation package for Node.js and CLI. It turn
 - Still thumbnail generation for JPG, JPEG, PNG, and WebP.
 - FFprobe metadata API for duration, dimensions, FPS, codecs, and format.
 - Dry-run preview planning without writing output files.
+- Scene-change sampling with configurable detection, spacing, fallback, and analysis speed.
 - Presets for common preview sizes.
 - Safe per-run temp directories.
 - No shell command strings; FFmpeg is called with spawn argument arrays.
@@ -77,6 +78,17 @@ Dry-run a preview plan without generating files:
 
 ```bash
 vidpeek input.mp4 --out preview.webp --preset web --dry-run --json
+```
+
+Build a preview from the strongest visual scene changes:
+
+```bash
+vidpeek input.mp4 \
+  --out scene-preview.webp \
+  --strategy scene-change \
+  --scene-threshold 10 \
+  --scene-min-gap 2 \
+  --overwrite
 ```
 
 Create a thumbnail from a percentage timestamp:
@@ -155,6 +167,35 @@ const plan = await dryRunPreview({
 console.log(plan.segments);
 ```
 
+### Scene-change strategy
+
+```ts
+import { generatePreview } from "vidpeek";
+
+await generatePreview({
+  input: "video.mp4",
+  output: "scene-preview.webp",
+  strategy: "scene-change",
+  clips: {
+    count: 5,
+    duration: 2,
+    range: [0.05, 0.95],
+    scene: {
+      threshold: 10,
+      minGap: 2,
+      fallback: "evenly-spaced",
+      maxCandidates: 200,
+      analysisFps: 8,
+    },
+  },
+  overwrite: true,
+});
+```
+
+Omit `analysisFps` for precise analysis of every frame. Setting it can make long videos faster to analyze, but brief cuts may be skipped.
+
+The equivalent CLI controls are `--scene-threshold`, `--scene-min-gap`, `--scene-fallback`, `--scene-max-candidates`, and `--scene-analysis-fps`. Scene-specific flags require `--strategy scene-change`.
+
 ## JSON Output
 
 Preview JSON:
@@ -164,7 +205,15 @@ Preview JSON:
   "output": "preview.webp",
   "format": "webp",
   "duration": 128.4,
-  "segments": [{ "index": 0, "start": 6.42, "duration": 2 }],
+  "segments": [
+    {
+      "index": 0,
+      "start": 6.42,
+      "duration": 2,
+      "source": "scene-change",
+      "sceneScore": 18.75
+    }
+  ],
   "elapsedMs": 1842,
   "sizeBytes": 384920
 }
@@ -212,11 +261,16 @@ Probe JSON:
 | `output` | `string` | Output preview or thumbnail path. Parent directories are created. |
 | `format` | `"webp" \| "gif" \| "mp4"` | Preview output format. Defaults from the selected preset. |
 | `preset` | `"tiny" \| "web" \| "discord" \| "high-quality"` | Preview preset. Defaults to `web`. |
-| `strategy` | `"evenly-spaced" \| "random" \| "manual"` | Segment selection strategy. Defaults to `evenly-spaced`. |
+| `strategy` | `"evenly-spaced" \| "random" \| "manual" \| "scene-change"` | Segment selection strategy. Defaults to `evenly-spaced`. |
 | `clips.count` | `number` | Number of clips to sample. |
 | `clips.duration` | `number` | Duration of each sampled clip in seconds. |
 | `clips.range` | `[number, number]` | Normalized sampling range. Defaults to `[0.05, 0.95]`. |
 | `clips.segments` | `{ start: number; duration: number }[]` | Required for manual segment selection. |
+| `clips.scene.threshold` | `number` | FFmpeg scene score from 0 to 100. Defaults to `10`. |
+| `clips.scene.minGap` | `number` | Preferred seconds between selected cuts. Defaults to clip duration. |
+| `clips.scene.fallback` | `"evenly-spaced" \| "none" \| "error"` | Behavior when too few cuts are found. `none` may produce zero dry-run segments; generation then fails clearly. Defaults to `evenly-spaced`. |
+| `clips.scene.maxCandidates` | `number` | Maximum top-scoring candidates considered. Defaults to `200`. |
+| `clips.scene.analysisFps` | `number` | Optional sampling FPS for faster analysis. Omit to inspect every frame. |
 | `width` | `number` | Output width. If height is omitted, VidPeek preserves aspect ratio. |
 | `height` | `number` | Output height. If width is omitted, VidPeek preserves aspect ratio. |
 | `fps` | `number` | Preview frames per second. |
@@ -274,6 +328,16 @@ vidpeek input.mp4 --out preview.webp --ffmpeg-path /path/to/ffmpeg --ffprobe-pat
 
 VidPeek expects a local file path. Use `vidpeek probe input.mp4 --json` first if you need to inspect metadata before preview generation.
 
+### Scene Detection Not Available
+
+The `scene-change` strategy requires an FFmpeg build containing the `scdet` filter. Check it with:
+
+```bash
+ffmpeg -hide_banner -h filter=scdet
+```
+
+If it is unavailable, install a fuller FFmpeg build or use another segment strategy.
+
 ### Existing Output
 
 Pass `--overwrite` when replacing files intentionally. Without it, VidPeek refuses to overwrite output.
@@ -315,7 +379,6 @@ vidpeek thumbnail input.mp4 --out thumb.jpg --at 25% --width 640 --overwrite
 
 ## Roadmap
 
-- Scene-change strategy.
 - Contact sheets.
 - Sprites.
 - AVIF previews.

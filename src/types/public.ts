@@ -1,12 +1,22 @@
 export type PreviewFormat = "webp" | "gif" | "mp4";
 
-export type SegmentStrategy = "evenly-spaced" | "random" | "manual";
+export type SegmentStrategy = "evenly-spaced" | "random" | "manual" | "scene-change";
+
+export type SceneFallback = "evenly-spaced" | "none" | "error";
 
 export type VidPeekPreset = "tiny" | "web" | "discord" | "high-quality";
 
 export interface ManualSegment {
   start: number; // seconds
   duration: number; // seconds
+}
+
+export interface SceneChangeOptions {
+  threshold?: number; // FFmpeg scdet score from 0 to 100
+  minGap?: number; // seconds between selected scene changes
+  fallback?: SceneFallback;
+  maxCandidates?: number;
+  analysisFps?: number;
 }
 
 export interface GeneratePreviewOptions {
@@ -22,6 +32,7 @@ export interface GeneratePreviewOptions {
     duration?: number;
     range?: [number, number]; // normalized 0 to 1
     segments?: ManualSegment[];
+    scene?: SceneChangeOptions;
   };
 
   width?: number;
@@ -41,6 +52,8 @@ export interface DryRunPreviewOptions extends GeneratePreviewOptions {
 
 export interface SelectedSegment extends ManualSegment {
   index: number;
+  source?: "scene-change" | "fallback";
+  sceneScore?: number;
 }
 
 export interface GeneratePreviewResult {
@@ -69,6 +82,13 @@ export interface PreviewDryRunResult {
       count: number;
       duration: number;
       range: [number, number];
+      scene?: {
+        threshold: number;
+        minGap: number;
+        fallback: SceneFallback;
+        maxCandidates: number;
+        analysisFps?: number;
+      };
     };
     overwrite: boolean;
   };

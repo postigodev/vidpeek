@@ -1,8 +1,9 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createProgram } from "../../src/cli";
+import { dryRunPreview } from "../../src/core/dry-run";
 import { runProcess } from "../../src/core/ffmpeg";
 import { generatePreview } from "../../src/core/generate-preview";
 import { probeVideo } from "../../src/core/ffprobe";
@@ -60,6 +61,34 @@ async function createSyntheticVideo(output: string): Promise<void> {
   });
 }
 
+async function createSceneChangeVideo(output: string): Promise<void> {
+  await runProcess({
+    binary: "ffmpeg",
+    label: "FFmpeg",
+    stage: "scene integration fixture generation",
+    args: [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=red:size=320x240:rate=24:duration=1",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=blue:size=320x240:rate=24:duration=1",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=green:size=320x240:rate=24:duration=1",
+      "-filter_complex",
+      "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p[v]",
+      "-map",
+      "[v]",
+      output,
+    ],
+  });
+}
+
 const canRunIntegration = (await hasBinary("ffmpeg")) && (await hasBinary("ffprobe"));
 const canEncodeWebP = canRunIntegration ? await hasEncoder("libwebp") : false;
 
@@ -76,11 +105,14 @@ if (canRunIntegration && !canEncodeWebP) {
 describe.skipIf(!canRunIntegration)("FFmpeg integration", () => {
   let tempDir = "";
   let samplePath = "";
+  let sceneSamplePath = "";
 
   beforeAll(async () => {
     tempDir = await mkdtemp(path.join(tmpdir(), "vidpeek-integration-"));
     samplePath = path.join(tempDir, "sample video.mp4");
+    sceneSamplePath = path.join(tempDir, "scene sample.mp4");
     await createSyntheticVideo(samplePath);
+    await createSceneChangeVideo(sceneSamplePath);
   });
 
   afterAll(async () => {
@@ -176,6 +208,99 @@ describe.skipIf(!canRunIntegration)("FFmpeg integration", () => {
     await expect(
       createProgram().parseAsync(["node", "vidpeek", "probe", samplePath, "--json"]),
     ).resolves.toBeTruthy();
+  });
+
+  it("detects scene changes through API, CLI dry-run JSON, and preview generation", async () => {
+    const clips = {
+      count: 2,
+      duration: 0.4,
+      range: [0.2, 1] as [number, number],
+      scene: { threshold: 5, minGap: 0.5, fallback: "error" as const },
+    };
+    const dryRun = await dryRunPreview({
+      input: sceneSamplePath,
+      output: path.join(tempDir, "scene dry-run.mp4"),
+      format: "mp4",
+      strategy: "scene-change",
+      clips,
+    });
+
+    expect(dryRun.segments).toHaveLength(2);
+    expect(dryRun.segments.map((segment) => segment.source)).toEqual([
+      "scene-change",
+      "scene-change",
+    ]);
+    expect(dryRun.segments[0].start).toBeCloseTo(1, 1);
+    expect(dryRun.segments[1].start).toBeCloseTo(2, 1);
+    expect(dryRun.segments.every((segment) => segment.sceneScore !== undefined)).toBe(true);
+
+    const cliOutput: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((value) => {
+      cliOutput.push(String(value));
+    });
+    try {
+      await createProgram().parseAsync([
+        "node",
+        "vidpeek",
+        sceneSamplePath,
+        "--out",
+        path.join(tempDir, "scene cli dry-run.mp4"),
+        "--format",
+        "mp4",
+        "--strategy",
+        "scene-change",
+        "--clips",
+        "2",
+        "--clip-duration",
+        "0.4",
+        "--range",
+        "0.2,1",
+        "--scene-threshold",
+        "5",
+        "--scene-min-gap",
+        "0.5",
+        "--scene-fallback",
+        "error",
+        "--dry-run",
+        "--json",
+      ]);
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(JSON.parse(cliOutput.join("\n")).segments).toHaveLength(2);
+
+    const previewPath = path.join(tempDir, "scene preview.mp4");
+    const preview = await generatePreview({
+      input: sceneSamplePath,
+      output: previewPath,
+      format: "mp4",
+      strategy: "scene-change",
+      clips,
+      overwrite: true,
+    });
+    expect(preview.segments).toEqual(dryRun.segments);
+    expect(await sizeOf(previewPath)).toBeGreaterThan(0);
+  });
+
+  it("returns an empty scene dry-run but fails generation clearly when fallback is none", async () => {
+    const options = {
+      input: sceneSamplePath,
+      output: path.join(tempDir, "empty scene preview.mp4"),
+      format: "mp4" as const,
+      strategy: "scene-change" as const,
+      clips: {
+        count: 2,
+        duration: 0.4,
+        range: [0.2, 1] as [number, number],
+        scene: { threshold: 100, fallback: "none" as const },
+      },
+    };
+
+    await expect(dryRunPreview(options)).resolves.toMatchObject({ segments: [] });
+    await expect(generatePreview(options)).rejects.toMatchObject({
+      code: "NO_SEGMENTS_SELECTED",
+      stage: "segment selection",
+    });
   });
 
   it.skipIf(!canEncodeWebP)("generates a WebP preview when libwebp is available", async () => {

@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { toVidPeekError } from "./errors";
+import { toVidPeekError, VidPeekError } from "./errors";
 import { runFfmpeg } from "./ffmpeg";
 import { probeVideo } from "./ffprobe";
 import {
@@ -10,7 +10,7 @@ import {
   getFileSize,
 } from "./output";
 import { resolveOptions } from "./presets";
-import { selectSegments } from "./segments";
+import { planPreviewSegments } from "./plan-segments";
 import { cleanupTempDir, createTempDir } from "./temp";
 import type { GeneratePreviewOptions, GeneratePreviewResult, PreviewFormat } from "../types/public";
 
@@ -100,7 +100,13 @@ export async function generatePreview(
     await ensureOutputDirectory(resolved.output);
 
     const metadata = await probeVideo(resolved.input, resolved.ffprobePath);
-    const segments = selectSegments(metadata.duration, resolved);
+    const segments = await planPreviewSegments(resolved.input, metadata.duration, resolved);
+    if (segments.length === 0) {
+      throw new VidPeekError("No preview segments were selected.", {
+        code: "NO_SEGMENTS_SELECTED",
+        stage: "segment selection",
+      });
+    }
     const clipPaths: string[] = [];
 
     for (const segment of segments) {

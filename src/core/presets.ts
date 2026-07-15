@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { VidPeekError } from "./errors";
-import type { GeneratePreviewOptions, PreviewFormat, VidPeekPreset } from "../types/public";
+import type {
+  GeneratePreviewOptions,
+  PreviewFormat,
+  SceneFallback,
+  VidPeekPreset,
+} from "../types/public";
 
 export interface ResolvedGeneratePreviewOptions extends GeneratePreviewOptions {
   format: PreviewFormat;
@@ -11,6 +16,13 @@ export interface ResolvedGeneratePreviewOptions extends GeneratePreviewOptions {
     duration: number;
     range: [number, number];
     segments?: NonNullable<GeneratePreviewOptions["clips"]>["segments"];
+    scene: {
+      threshold: number;
+      minGap: number;
+      fallback: SceneFallback;
+      maxCandidates: number;
+      analysisFps?: number;
+    };
   };
   fps: number;
   speed: number;
@@ -57,12 +69,20 @@ const manualSegmentSchema = z.object({
   duration: z.number().finite().positive(),
 });
 
+const sceneOptionsSchema = z.object({
+  threshold: z.number().finite().min(0).max(100).optional(),
+  minGap: z.number().finite().min(0).optional(),
+  fallback: z.enum(["evenly-spaced", "none", "error"]).optional(),
+  maxCandidates: z.number().int().positive().optional(),
+  analysisFps: z.number().finite().positive().optional(),
+});
+
 const optionsSchema = z.object({
   input: z.string().min(1, "input is required"),
   output: z.string().min(1, "output is required"),
   format: z.enum(["webp", "gif", "mp4"]).optional(),
   preset: z.enum(["tiny", "web", "discord", "high-quality"]).optional(),
-  strategy: z.enum(["evenly-spaced", "random", "manual"]).optional(),
+  strategy: z.enum(["evenly-spaced", "random", "manual", "scene-change"]).optional(),
   clips: z
     .object({
       count: z.number().int().positive().optional(),
@@ -74,6 +94,7 @@ const optionsSchema = z.object({
         })
         .optional(),
       segments: z.array(manualSegmentSchema).nonempty().optional(),
+      scene: sceneOptionsSchema.optional(),
     })
     .optional(),
   width: z.number().int().positive().optional(),
@@ -97,17 +118,31 @@ export function resolveOptions(options: GeneratePreviewOptions): ResolvedGenerat
 
   const presetName = parsed.data.preset ?? "web";
   const preset = PRESETS[presetName];
+  const clipDuration = parsed.data.clips?.duration ?? preset.clips.duration;
   const clips = {
     count: parsed.data.clips?.count ?? preset.clips.count,
-    duration: parsed.data.clips?.duration ?? preset.clips.duration,
+    duration: clipDuration,
     range: parsed.data.clips?.range ?? ([0.05, 0.95] as [number, number]),
     segments: parsed.data.clips?.segments,
+    scene: {
+      threshold: parsed.data.clips?.scene?.threshold ?? 10,
+      minGap: parsed.data.clips?.scene?.minGap ?? clipDuration,
+      fallback: parsed.data.clips?.scene?.fallback ?? "evenly-spaced",
+      maxCandidates: parsed.data.clips?.scene?.maxCandidates ?? 200,
+      analysisFps: parsed.data.clips?.scene?.analysisFps,
+    },
   };
   const strategy = parsed.data.strategy ?? "evenly-spaced";
 
   if (strategy === "manual" && !clips.segments?.length) {
     throw new VidPeekError("Manual strategy requires clips.segments.", {
       code: "MISSING_MANUAL_SEGMENTS",
+    });
+  }
+
+  if (strategy !== "scene-change" && parsed.data.clips?.scene !== undefined) {
+    throw new VidPeekError("clips.scene requires strategy: scene-change.", {
+      code: "INVALID_OPTIONS",
     });
   }
 

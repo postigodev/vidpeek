@@ -26,6 +26,14 @@ export function formatCommand(binary: string, args: string[]): string {
 }
 
 function buildFailureHint(stderr: string): string {
+  if (/No such filter.*scdet/i.test(stderr)) {
+    return [
+      "",
+      "Hint: this FFmpeg build does not include the scdet filter required by the scene-change strategy.",
+      "Install a full FFmpeg build with scdet support or choose another segment strategy.",
+    ].join("\n");
+  }
+
   if (/Unknown encoder|Encoder not found/i.test(stderr)) {
     return [
       "",

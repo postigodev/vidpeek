@@ -1,14 +1,14 @@
 import { probeVideo } from "./ffprobe";
 import { assertInputFileExists } from "./output";
 import { resolveOptions } from "./presets";
-import { selectSegments } from "./segments";
+import { planPreviewSegments } from "./plan-segments";
 import type { GeneratePreviewOptions, PreviewDryRunResult } from "../types/public";
 
 export async function dryRunPreview(options: GeneratePreviewOptions): Promise<PreviewDryRunResult> {
   const resolved = resolveOptions(options);
   await assertInputFileExists(resolved.input);
   const metadata = await probeVideo(resolved.input, resolved.ffprobePath);
-  const segments = selectSegments(metadata.duration, resolved);
+  const segments = await planPreviewSegments(resolved.input, metadata.duration, resolved);
 
   return {
     input: resolved.input,
@@ -27,6 +27,7 @@ export async function dryRunPreview(options: GeneratePreviewOptions): Promise<Pr
         count: resolved.clips.count,
         duration: resolved.clips.duration,
         range: resolved.clips.range,
+        ...(resolved.strategy === "scene-change" ? { scene: resolved.clips.scene } : {}),
       },
       overwrite: resolved.overwrite,
     },

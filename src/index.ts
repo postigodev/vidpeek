@@ -12,6 +12,8 @@ export type {
   ManualSegment,
   PreviewDryRunResult,
   PreviewFormat,
+  SceneChangeOptions,
+  SceneFallback,
   SegmentStrategy,
   SelectedSegment,
   ThumbnailTimestamp,
